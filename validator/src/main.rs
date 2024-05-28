@@ -36,28 +36,36 @@ fn validate_poh_entries(poh_entries: &Vec<PohEntry>) -> Result<(), usize> {
         let curr_entry = &poh_entries[i];
 
         let mut hasher = Sha256::new();
-        let timestamp_bytes = curr_entry.timestamp.to_be_bytes();  
+        let timestamp_bytes = curr_entry.timestamp.to_be_bytes();
 
         hasher.update(&prev_entry.hash);
         hasher.update(&timestamp_bytes);
         let expected_hash = hasher.finalize_reset().to_vec();
 
-        println!(
-            "Client Validation: prev_hash={:?}, timestamp_bytes={:?}, expected={:?}, got={:?}", 
-            prev_entry.hash, timestamp_bytes, expected_hash, curr_entry.hash
-        ); 
-
         if curr_entry.hash != expected_hash {
             println!(
-                "Validation failed at index {}: prev_hash={:?}, timestamp_bytes={:?}, expected={:?}, got={:?}", 
+                "Validation failed at index {}: prev_hash={:?}, timestamp_bytes={:?}, expected={:?}, got={:?}",
                 i, prev_entry.hash, timestamp_bytes, expected_hash, curr_entry.hash
-            ); 
+            );
             return Err(i);
         } else {
-            println!("Validation succeeded at index {}: hash={:?}", i, curr_entry.hash); 
+            println!("Validation succeeded at index {}: hash={:?}", i, curr_entry.hash);
         }
     }
     Ok(())
+}
+
+fn validate_block(block: &Block) -> bool {
+    let calculated_hash = calculate_block_hash(&block.poh_entries);
+    calculated_hash == block.block_hash
+}
+
+fn calculate_block_hash(poh_entries: &Vec<PohEntry>) -> Vec<u8> {
+    let mut hasher = Sha256::new();
+    for entry in poh_entries {
+        hasher.update(&entry.hash);
+    }
+    hasher.finalize().to_vec()
 }
 
 #[tokio::main]
@@ -92,7 +100,7 @@ async fn main() -> io::Result<()> {
 
         match serde_json::from_slice::<Message>(&buffer) {
             Ok(Message::PoHEntries(poh_entries)) => {
-                println!("Received PoH entries: {:?}", poh_entries); 
+                println!("Received PoH entries: {:?}", poh_entries);
                 match validate_poh_entries(&poh_entries) {
                     Ok(_) => {
                         println!("Valid PoH entries: {:?}", poh_entries);
@@ -107,11 +115,16 @@ async fn main() -> io::Result<()> {
                 }
             },
             Ok(Message::BlockProposal(block)) => {
-                println!("Received Block Proposal: {:?}", block); 
-                let vote = Message::ConsensusVote(block.clone());
-                let serialized_vote = serde_json::to_string(&vote).unwrap();
-                stream.write_all(&(serialized_vote.len() as u32).to_be_bytes()).await?;
-                stream.write_all(serialized_vote.as_bytes()).await?;
+                println!("Received Block Proposal: {:?}", block);
+                if validate_block(&block) {
+                    let vote = Message::ConsensusVote(block.clone());
+                    let serialized_vote = serde_json::to_string(&vote).unwrap();
+                    stream.write_all(&(serialized_vote.len() as u32).to_be_bytes()).await?;
+                    stream.write_all(serialized_vote.as_bytes()).await?;
+                    println!("Sent Consensus Vote for Block: {:?}", block);
+                } else {
+                    println!("Invalid Block Proposal received: {:?}", block);
+                }
             },
             Ok(Message::ConsensusVote(block)) => {
                 println!("Received Consensus Vote for Block: {:?}", block);
