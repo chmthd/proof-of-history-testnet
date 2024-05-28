@@ -35,6 +35,15 @@ enum Message {
     RegisterValidator(Validator),
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+enum MonitorMessage {
+    NewEntry,
+    ValidatorConnected,
+    ValidatorDisconnected,
+    BlockProposal,
+    ConsensusVote,
+}
+
 struct PoHGenerator {
     poh: Arc<Mutex<Vec<PohEntry>>>,
     validators: Arc<Mutex<HashMap<String, usize>>>,
@@ -73,6 +82,8 @@ impl PoHGenerator {
                     poh.push(entry);
                     prev_hash = result.clone();
                     println!("Generated entry at timestamp {}", timestamp);
+
+                    send_monitor_message(MonitorMessage::NewEntry).await;
                 }
 
                 tokio::time::sleep(tokio::time::Duration::from_millis(400)).await;
@@ -84,6 +95,7 @@ impl PoHGenerator {
         let peer_addr = stream.peer_addr().unwrap().to_string();
         validators.lock().await.insert(peer_addr.clone(), 0);
         println!("New validator connected: {}", peer_addr);
+        send_monitor_message(MonitorMessage::ValidatorConnected).await;
 
         loop {
             {
@@ -102,6 +114,7 @@ impl PoHGenerator {
             tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
         }
         println!("Validator disconnected: {}", peer_addr);
+        send_monitor_message(MonitorMessage::ValidatorDisconnected).await;
     }
 
     async fn start_server(&self) {
@@ -135,6 +148,7 @@ async fn propose_block(poh: Arc<Mutex<Vec<PohEntry>>>, validators: Arc<Mutex<Has
         };
 
         println!("Proposing new block");
+        send_monitor_message(MonitorMessage::BlockProposal).await;
         
         let validators = validators.lock().await;
         for (addr, _) in validators.iter() {
@@ -149,6 +163,16 @@ async fn propose_block(poh: Arc<Mutex<Vec<PohEntry>>>, validators: Arc<Mutex<Has
                 }
                 println!("Proposed block to {}", addr);
             }
+        }
+    }
+}
+
+async fn send_monitor_message(message: MonitorMessage) {
+    if let Ok(mut stream) = TcpStream::connect("127.0.0.1:9000").await {
+        let serialized_message = serde_json::to_string(&message).unwrap();
+        let message_length = (serialized_message.len() as u32).to_be_bytes();
+        if stream.write_all(&message_length).await.is_ok() {
+            stream.write_all(&serialized_message.as_bytes()).await.unwrap();
         }
     }
 }

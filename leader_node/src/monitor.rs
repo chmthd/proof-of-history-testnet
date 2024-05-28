@@ -1,134 +1,87 @@
-use std::sync::{Arc, Mutex};
-use tokio::time::{self, Duration};
-use std::collections::HashSet;
-use tokio::sync::RwLock;
-use std::time::Instant;
+use tokio::net::TcpListener;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use serde::{Serialize, Deserialize};
+use std::collections::HashMap;
+use tokio::sync::Mutex;
+use std::sync::Arc;
 
+#[derive(Serialize, Deserialize, Debug)]
+enum MonitorMessage {
+    NewEntry,
+    ValidatorConnected,
+    ValidatorDisconnected,
+    BlockProposal,
+    ConsensusVote,
+}
+
+#[derive(Debug)]
 struct MonitorState {
     current_block_number: u64,
-    connected_validators: HashSet<String>,
-    block_proposals: u64,
-    consensus_votes: u64,
-    failed_consensus_votes: u64,
-    total_proposal_time: u64,
-    proposal_start_time: Option<Instant>,
-}
-
-impl MonitorState {
-    fn new() -> Self {
-        MonitorState {
-            current_block_number: 0,
-            connected_validators: HashSet::new(),
-            block_proposals: 0,
-            consensus_votes: 0,
-            failed_consensus_votes: 0,
-            total_proposal_time: 0,
-            proposal_start_time: None,
-        }
-    }
-
-    fn add_validator(&mut self, addr: String) {
-        self.connected_validators.insert(addr);
-    }
-
-    fn remove_validator(&mut self, addr: &String) {
-        self.connected_validators.remove(addr);
-    }
-
-    fn increment_block_proposals(&mut self) {
-        self.block_proposals += 1;
-        self.current_block_number += 1;
-        if let Some(start_time) = self.proposal_start_time.take() {
-            let duration = start_time.elapsed().as_secs();
-            self.total_proposal_time += duration;
-        }
-        self.proposal_start_time = Some(Instant::now());
-    }
-
-    fn increment_consensus_votes(&mut self) {
-        self.consensus_votes += 1;
-    }
-
-    fn increment_failed_consensus_votes(&mut self) {
-        self.failed_consensus_votes += 1;
-    }
-
-    fn average_proposal_time(&self) -> u64 {
-        if self.block_proposals == 0 {
-            0
-        } else {
-            self.total_proposal_time / self.block_proposals
-        }
-    }
-}
-
-async fn display_state(state: Arc<RwLock<MonitorState>>) {
-    loop {
-        {
-            let state = state.read().await;
-            println!("\n---- Monitor State ----");
-            println!("Current Block Number: {}", state.current_block_number);
-            println!("Connected Validators: {:?}", state.connected_validators);
-            println!("Block Proposals: {}", state.block_proposals);
-            println!("Consensus Votes: {}", state.consensus_votes);
-            println!("Failed Consensus Votes: {}", state.failed_consensus_votes);
-            println!("Average Block Proposal Time: {} seconds", state.average_proposal_time());
-            println!("------------------------\n");
-        }
-        time::sleep(Duration::from_secs(5)).await; // Update every 5 seconds
-    }
-}
-
-async fn simulate_leader(state: Arc<RwLock<MonitorState>>) {
-    loop {
-        {
-            let mut state = state.write().await;
-            state.increment_block_proposals();
-        }
-        time::sleep(Duration::from_secs(10)).await; // Propose a block every 10 seconds
-    }
-}
-
-async fn simulate_validator(state: Arc<RwLock<MonitorState>>, addr: String) {
-    {
-        let mut state = state.write().await;
-        state.add_validator(addr.clone());
-    }
-
-    loop {
-        {
-            let mut state = state.write().await;
-            state.increment_consensus_votes();
-        }
-        time::sleep(Duration::from_secs(15)).await; // Send a consensus vote every 15 seconds
-    }
-}
-
-async fn simulate_failed_votes(state: Arc<RwLock<MonitorState>>) {
-    loop {
-        {
-            let mut state = state.write().await;
-            state.increment_failed_consensus_votes();
-        }
-        time::sleep(Duration::from_secs(20)).await; // Fail a vote every 20 seconds
-    }
+    connected_validators: usize,
+    block_proposals: usize,
+    consensus_votes: usize,
 }
 
 #[tokio::main]
 async fn main() {
-    let state = Arc::new(RwLock::new(MonitorState::new()));
+    let state = Arc::new(Mutex::new(MonitorState {
+        current_block_number: 0,
+        connected_validators: 0,
+        block_proposals: 0,
+        consensus_votes: 0,
+    }));
 
-    tokio::spawn(display_state(state.clone()));
+    let listener = TcpListener::bind("127.0.0.1:9000").await.unwrap();
+    println!("Monitor server running on 127.0.0.1:9000");
 
-    tokio::spawn(simulate_leader(state.clone()));
-
-    tokio::spawn(simulate_validator(state.clone(), "127.0.0.1:3001".to_string()));
-    tokio::spawn(simulate_validator(state.clone(), "127.0.0.1:3002".to_string()));
-
-    tokio::spawn(simulate_failed_votes(state.clone()));
-
-    // Keep the main thread alive
     loop {
-        time::sleep(Duration::from_secs(60)).await;
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let state = Arc::clone(&state);
+
+        tokio::spawn(async move {
+            loop {
+                let mut length_buffer = [0; 4];
+                if let Err(_) = socket.read_exact(&mut length_buffer).await {
+                    break;
+                }
+
+                let message_length = u32::from_be_bytes(length_buffer) as usize;
+                let mut buffer = vec![0; message_length];
+
+                if let Err(_) = socket.read_exact(&mut buffer).await {
+                    break;
+                }
+
+                if let Ok(message) = serde_json::from_slice::<MonitorMessage>(&buffer) {
+                    let mut state = state.lock().await;
+                    match message {
+                        MonitorMessage::NewEntry => {
+                            state.current_block_number += 1;
+                        }
+                        MonitorMessage::ValidatorConnected => {
+                            state.connected_validators += 1;
+                        }
+                        MonitorMessage::ValidatorDisconnected => {
+                            if state.connected_validators > 0 {
+                                state.connected_validators -= 1;
+                            }
+                        }
+                        MonitorMessage::BlockProposal => {
+                            state.block_proposals += 1;
+                        }
+                        MonitorMessage::ConsensusVote => {
+                            state.consensus_votes += 1;
+                        }
+                    }
+                    println!(
+                        "Current Block: {}, Connected Validators: {}, Block Proposals: {}, Consensus Votes: {}",
+                        state.current_block_number,
+                        state.connected_validators,
+                        state.block_proposals,
+                        state.consensus_votes
+                    );
+                }
+            }
+        });
     }
 }
