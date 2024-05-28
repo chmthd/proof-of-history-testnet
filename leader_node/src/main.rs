@@ -1,6 +1,6 @@
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncWriteExt};
 use sha2::{Sha256, Digest};
 use serde::{Serialize, Deserialize};
 use std::sync::Arc;
@@ -30,7 +30,7 @@ enum Message {
 
 struct PoHGenerator {
     poh: Arc<Mutex<Vec<PohEntry>>>,
-    validators: Arc<Mutex<HashMap<String, usize>>>, // Validator address and vote count
+    validators: Arc<Mutex<HashMap<String, usize>>>, 
 }
 
 impl PoHGenerator {
@@ -44,7 +44,7 @@ impl PoHGenerator {
     fn start(&self) {
         let poh_clone = Arc::clone(&self.poh);
         task::spawn(async move {
-            let mut prev_hash = vec![0; 32]; // Initial previous hash (all zeros)
+            let mut prev_hash = vec![0; 32]; 
 
             loop {
                 let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
@@ -64,11 +64,11 @@ impl PoHGenerator {
                 {
                     let mut poh = poh_clone.lock().await;
                     poh.push(entry);
-                    prev_hash = result.clone(); // Update prev_hash with the current result
+                    prev_hash = result.clone(); 
                     println!("Generated entry: timestamp={}, prev_hash={:?}, timestamp_bytes={:?}, result={:?}", timestamp, prev_hash, timestamp_bytes, result); // Debug output
                 }
 
-                tokio::time::sleep(tokio::time::Duration::from_millis(400)).await; // 400-millisecond interval
+                tokio::time::sleep(tokio::time::Duration::from_millis(400)).await; 
             }
         });
     }
@@ -81,12 +81,17 @@ impl PoHGenerator {
             {
                 let poh = poh.lock().await;
                 let serialized = serde_json::to_string(&Message::PoHEntries(poh.clone())).unwrap();
+                let message_length = (serialized.len() as u32).to_be_bytes();
+                if let Err(e) = stream.write_all(&message_length).await {
+                    eprintln!("Failed to send data length: {}", e);
+                    break;
+                }
                 if let Err(e) = stream.write_all(serialized.as_bytes()).await {
                     eprintln!("Failed to send data: {}", e);
                     break;
                 }
             }
-            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await; // Send every 5 seconds
+            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await; 
         }
     }
 
@@ -107,7 +112,7 @@ impl PoHGenerator {
 
 async fn propose_block(poh: Arc<Mutex<Vec<PohEntry>>>, validators: Arc<Mutex<HashMap<String, usize>>>) {
     loop {
-        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await; // Propose a block every 10 seconds
+        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await; 
 
         let poh_entries;
         {
@@ -117,15 +122,21 @@ async fn propose_block(poh: Arc<Mutex<Vec<PohEntry>>>, validators: Arc<Mutex<Has
 
         let block = Block {
             poh_entries: poh_entries.clone(),
-            block_hash: vec![0; 32], // Placeholder hash, should be computed
+            block_hash: vec![0; 32], 
         };
 
-        // Broadcast block proposal to all validators
         let validators = validators.lock().await;
         for (addr, _) in validators.iter() {
-            if let Ok(mut stream) = TcpStream::connect(addr).await {
+            if let Ok(mut stream) = tokio::net::TcpStream::connect(addr).await {
                 let serialized_block = serde_json::to_string(&Message::BlockProposal(block.clone())).unwrap();
-                stream.write_all(serialized_block.as_bytes()).await.unwrap();
+                let message_length = (serialized_block.len() as u32).to_be_bytes();
+                if let Err(e) = stream.write_all(&message_length).await {
+                    eprintln!("Failed to send block proposal length: {}", e);
+                    continue;
+                }
+                if let Err(e) = stream.write_all(&serialized_block.into_bytes()).await {
+                    eprintln!("Failed to send block proposal: {}", e);
+                }
             }
         }
     }
