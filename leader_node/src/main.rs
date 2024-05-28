@@ -1,15 +1,12 @@
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
-use tokio::io::{AsyncWriteExt, AsyncReadExt};
+use tokio::io::{AsyncWriteExt};
 use sha2::{Sha256, Digest};
 use serde::{Serialize, Deserialize};
 use std::sync::Arc;
 use tokio::task;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::collections::HashMap;
-use rand::seq::IteratorRandom;
-use rand::rngs::StdRng;
-use rand::SeedableRng;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct PohEntry {
@@ -75,9 +72,8 @@ impl PoHGenerator {
                     let mut poh = poh_clone.lock().await;
                     poh.push(entry);
                     prev_hash = result.clone();
+                    println!("Generated entry at timestamp {}", timestamp);
                 }
-
-                println!("Generated entry at timestamp {}", timestamp);
 
                 tokio::time::sleep(tokio::time::Duration::from_millis(400)).await;
             }
@@ -95,12 +91,10 @@ impl PoHGenerator {
                 let serialized = serde_json::to_string(&Message::PoHEntries(poh.clone())).unwrap();
                 let message_length = (serialized.len() as u32).to_be_bytes();
 
-                if let Err(e) = stream.write_all(&message_length).await {
-                    eprintln!("Failed to send data length to {}: {}", peer_addr, e);
+                if let Err(_e) = stream.write_all(&message_length).await {
                     break;
                 }
-                if let Err(e) = stream.write_all(serialized.as_bytes()).await {
-                    eprintln!("Failed to send data to {}: {}", peer_addr, e);
+                if let Err(_e) = stream.write_all(serialized.as_bytes()).await {
                     break;
                 }
                 println!("Sent PoH entries to {}", peer_addr);
@@ -141,23 +135,19 @@ async fn propose_block(poh: Arc<Mutex<Vec<PohEntry>>>, validators: Arc<Mutex<Has
         };
 
         println!("Proposing new block");
-
+        
         let validators = validators.lock().await;
-        let validator_keys: Vec<String> = validators.keys().cloned().collect();
-        let mut rng = StdRng::from_entropy();
-
-        for addr in validator_keys.iter().choose_multiple(&mut rng, validator_keys.len() / 2) {
+        for (addr, _) in validators.iter() {
             if let Ok(mut stream) = tokio::net::TcpStream::connect(addr).await {
                 let serialized_block = serde_json::to_string(&Message::BlockProposal(block.clone())).unwrap();
                 let message_length = (serialized_block.len() as u32).to_be_bytes();
-                if let Err(e) = stream.write_all(&message_length).await {
-                    eprintln!("Failed to send block proposal length: {}", e);
+                if let Err(_e) = stream.write_all(&message_length).await {
                     continue;
                 }
-                if let Err(e) = stream.write_all(&serialized_block.clone().into_bytes()).await {
-                    eprintln!("Failed to send block proposal: {}", e);
+                if let Err(_e) = stream.write_all(&serialized_block.clone().into_bytes()).await {
+                    continue;
                 }
-                println!("Sent block proposal to {}", addr);
+                println!("Proposed block to {}", addr);
             }
         }
     }

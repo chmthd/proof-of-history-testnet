@@ -46,6 +46,10 @@ fn validate_poh_entries(poh_entries: &Vec<PohEntry>) -> Result<(), usize> {
         let expected_hash = hasher.finalize_reset().to_vec();
 
         if curr_entry.hash != expected_hash {
+            println!(
+                "Validation failed at index {}: expected={:?}, got={:?}",
+                i, expected_hash, curr_entry.hash
+            );
             return Err(i);
         }
     }
@@ -65,6 +69,7 @@ async fn gossip_message(message: &Message, peer_addrs: &Vec<String>) {
             if let Err(_) = stream.write_all(serialized_message.as_bytes()).await {
                 continue;
             }
+            println!("Gossiped message to {}", addr);
         }
     }
 }
@@ -81,6 +86,7 @@ async fn main() -> io::Result<()> {
     let serialized_register = serde_json::to_string(&register_message).unwrap();
     stream.write_all(&(serialized_register.len() as u32).to_be_bytes()).await?;
     stream.write_all(serialized_register.as_bytes()).await?;
+    println!("Registered validator");
 
     loop {
         let mut length_buffer = [0; 4];
@@ -90,30 +96,34 @@ async fn main() -> io::Result<()> {
 
         let message_length = u32::from_be_bytes(length_buffer) as usize;
         let mut buffer = vec![0; message_length];
-
         if stream.read_exact(&mut buffer).await.is_err() {
             break;
         }
 
         match serde_json::from_slice::<Message>(&buffer) {
             Ok(Message::PoHEntries(poh_entries)) => {
-                if validate_poh_entries(&poh_entries).is_ok() {
-                    gossip_message(&Message::PoHEntries(poh_entries), &peer_addrs).await;
-                } else {
-                    let request = Message::RetransmissionRequest(poh_entries.len());
-                    let serialized_request = serde_json::to_string(&request).unwrap();
-                    stream.write_all(&(serialized_request.len() as u32).to_be_bytes()).await?;
-                    stream.write_all(serialized_request.as_bytes()).await?;
+                match validate_poh_entries(&poh_entries) {
+                    Ok(_) => println!("Valid PoH entries received"),
+                    Err(index) => {
+                        println!("Invalid PoH entry at index {}, requesting retransmission", index);
+                        let request = Message::RetransmissionRequest(index);
+                        let serialized_request = serde_json::to_string(&request).unwrap();
+                        stream.write_all(&(serialized_request.len() as u32).to_be_bytes()).await?;
+                        stream.write_all(serialized_request.as_bytes()).await?;
+                    }
                 }
             },
             Ok(Message::BlockProposal(block)) => {
+                println!("Received block proposal");
+                gossip_message(&Message::BlockProposal(block.clone()), &peer_addrs).await;
                 let vote = Message::ConsensusVote(block.clone());
-                gossip_message(&Message::BlockProposal(block), &peer_addrs).await;
                 let serialized_vote = serde_json::to_string(&vote).unwrap();
                 stream.write_all(&(serialized_vote.len() as u32).to_be_bytes()).await?;
                 stream.write_all(serialized_vote.as_bytes()).await?;
+                println!("Sent consensus vote");
             },
             Ok(Message::ConsensusVote(block)) => {
+                println!("Received consensus vote");
                 gossip_message(&Message::ConsensusVote(block), &peer_addrs).await;
             },
             _ => {},
