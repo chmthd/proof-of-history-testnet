@@ -1,1 +1,1 @@
-/home/x/Documents/crypto/PoH/client/target/debug/client: /home/x/Documents/crypto/PoH/client/src/main.rs
+/home/x/Documents/crypto/PoH/validator/target/debug/client: /home/x/Documents/crypto/PoH/validator/src/main.rs
