@@ -86,6 +86,52 @@ impl PoHGenerator {
         println!("New validator connected: {}", peer_addr);
 
         loop {
+            let mut length_buffer = [0; 4];
+            if let Err(e) = stream.read_exact(&mut length_buffer).await {
+                eprintln!("Failed to read message length: {}", e);
+                break;
+            }
+
+            let message_length = u32::from_be_bytes(length_buffer) as usize;
+            let mut buffer = vec![0; message_length];
+
+            if let Err(e) = stream.read_exact(&mut buffer).await {
+                eprintln!("Failed to read message data: {}", e);
+                break;
+            }
+
+            match serde_json::from_slice::<Message>(&buffer) {
+                Ok(Message::RetransmissionRequest(index)) => {
+                    println!("Received retransmission request for index: {}", index);
+                    let poh = poh.lock().await;
+                    let entries_to_send: Vec<PohEntry> = poh.iter().skip(index).cloned().collect();
+                    let serialized = serde_json::to_string(&Message::PoHEntries(entries_to_send)).unwrap();
+                    let message_length = (serialized.len() as u32).to_be_bytes();
+                    if let Err(e) = stream.write_all(&message_length).await {
+                        eprintln!("Failed to send data length: {}", e);
+                        continue;
+                    }
+                    if let Err(e) = stream.write_all(serialized.as_bytes()).await {
+                        eprintln!("Failed to send data: {}", e);
+                        continue;
+                    }
+                    println!("Sent retransmitted PoH entries from index {}: {}", index, serialized);
+                },
+                Ok(Message::ConsensusVote(block)) => {
+                    println!("Received consensus vote for block: {:?}", block);
+                },
+                Ok(Message::RegisterValidator(_)) => {
+                    // Ignore RegisterValidator messages
+                },
+                Ok(_) => {
+                    // Ignore other messages for now
+                },
+                Err(e) => {
+                    println!("Failed to deserialize message: {:?}", e);
+                    continue;
+                },
+            }
+
             {
                 let poh = poh.lock().await;
                 let serialized = serde_json::to_string(&Message::PoHEntries(poh.clone())).unwrap();
