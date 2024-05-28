@@ -1,10 +1,11 @@
-use sha2::{Sha256, Digest};
-use std::sync::Arc;
-use tokio::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::Mutex;
 use tokio::io::AsyncWriteExt;
+use sha2::{Sha256, Digest};
 use serde::{Serialize, Deserialize};
+use std::sync::Arc;
+use tokio::task;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Serialize, Deserialize, Debug)]
 struct PohEntry {
@@ -18,27 +19,36 @@ struct PoHGenerator {
 
 impl PoHGenerator {
     fn new() -> Self {
-        let poh = Arc::new(Mutex::new(vec![]));
-        PoHGenerator { poh }
+        PoHGenerator {
+            poh: Arc::new(Mutex::new(Vec::new())),
+        }
     }
 
     fn start(&self) {
         let poh_clone = Arc::clone(&self.poh);
-        tokio::spawn(async move {
-            let mut hasher = Sha256::new();
+        task::spawn(async move {
+            let mut prev_hash = vec![0; 32];
             loop {
-                let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards");
-                hasher.update(now.as_secs().to_string());
-                hasher.update(now.subsec_nanos().to_string());
-                let result = hasher.finalize_reset();
+                let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+
+                let mut hasher = Sha256::new();
+                let timestamp_bytes = timestamp.to_be_bytes();
+                
+                hasher.update(&prev_hash);
+                hasher.update(&timestamp_bytes);
+                let result = hasher.finalize_reset().to_vec();
+
                 let entry = PohEntry {
-                    timestamp: now.as_secs(),
-                    hash: result.to_vec(),
+                    timestamp,
+                    hash: result.clone(),
                 };
+
                 {
                     let mut poh = poh_clone.lock().await;
                     poh.push(entry);
+                    prev_hash = result.clone();
                 }
+
                 tokio::time::sleep(tokio::time::Duration::from_millis(400)).await; // 400-millisecond interval
             }
         });
@@ -58,7 +68,6 @@ impl PoHGenerator {
 
     async fn start_server(&self) {
         let listener = TcpListener::bind("127.0.0.1:8080").await.unwrap();
-        println!("Server running on 127.0.0.1:8080");
 
         loop {
             let (socket, _) = listener.accept().await.unwrap();
