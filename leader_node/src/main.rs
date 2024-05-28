@@ -1,6 +1,6 @@
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
-use tokio::io::{AsyncWriteExt};
+use tokio::io::{AsyncWriteExt, AsyncReadExt};
 use sha2::{Sha256, Digest};
 use serde::{Serialize, Deserialize};
 use std::sync::Arc;
@@ -20,12 +20,19 @@ struct Block {
     block_hash: Vec<u8>,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct Validator {
+    id: String,
+    public_key: Vec<u8>,
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 enum Message {
     PoHEntries(Vec<PohEntry>),
     RetransmissionRequest(usize),
     BlockProposal(Block),
     ConsensusVote(Block),
+    RegisterValidator(Validator),
 }
 
 struct PoHGenerator {
@@ -76,23 +83,29 @@ impl PoHGenerator {
     async fn handle_connection(mut stream: TcpStream, poh: Arc<Mutex<Vec<PohEntry>>>, validators: Arc<Mutex<HashMap<String, usize>>>) {
         let peer_addr = stream.peer_addr().unwrap().to_string();
         validators.lock().await.insert(peer_addr.clone(), 0);
+        println!("New validator connected: {}", peer_addr);
 
         loop {
             {
                 let poh = poh.lock().await;
                 let serialized = serde_json::to_string(&Message::PoHEntries(poh.clone())).unwrap();
                 let message_length = (serialized.len() as u32).to_be_bytes();
+
+                println!("Sending message of length: {} to {}", serialized.len(), peer_addr);
+
                 if let Err(e) = stream.write_all(&message_length).await {
-                    eprintln!("Failed to send data length: {}", e);
+                    eprintln!("Failed to send data length to {}: {}", peer_addr, e);
                     break;
                 }
                 if let Err(e) = stream.write_all(serialized.as_bytes()).await {
-                    eprintln!("Failed to send data: {}", e);
+                    eprintln!("Failed to send data to {}: {}", peer_addr, e);
                     break;
                 }
+                println!("Sent PoH entries to {}: {}", peer_addr, serialized);
             }
             tokio::time::sleep(tokio::time::Duration::from_secs(5)).await; 
         }
+        println!("Validator disconnected: {}", peer_addr);
     }
 
     async fn start_server(&self) {
@@ -134,9 +147,10 @@ async fn propose_block(poh: Arc<Mutex<Vec<PohEntry>>>, validators: Arc<Mutex<Has
                     eprintln!("Failed to send block proposal length: {}", e);
                     continue;
                 }
-                if let Err(e) = stream.write_all(&serialized_block.into_bytes()).await {
+                if let Err(e) = stream.write_all(&serialized_block.clone().into_bytes()).await {
                     eprintln!("Failed to send block proposal: {}", e);
                 }
+                println!("Sent block proposal to {}: {}", addr, serialized_block);
             }
         }
     }

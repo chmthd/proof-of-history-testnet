@@ -15,12 +15,19 @@ struct Block {
     block_hash: Vec<u8>,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct Validator {
+    id: String,
+    public_key: Vec<u8>,
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 enum Message {
     PoHEntries(Vec<PohEntry>),
     RetransmissionRequest(usize),
     BlockProposal(Block),
     ConsensusVote(Block),
+    RegisterValidator(Validator),
 }
 
 fn validate_poh_entries(poh_entries: &Vec<PohEntry>) -> Result<(), usize> {
@@ -58,18 +65,28 @@ async fn main() -> io::Result<()> {
     let mut stream = TcpStream::connect("127.0.0.1:8080").await?;
     println!("Connected to the server at 127.0.0.1:8080");
 
+    // Send validator registration message
+    let register_message = Message::RegisterValidator(Validator {
+        id: "validator_1".to_string(),
+        public_key: vec![1, 2, 3, 4, 5],
+    });
+    let serialized_register = serde_json::to_string(&register_message).unwrap();
+    stream.write_all(&(serialized_register.len() as u32).to_be_bytes()).await?;
+    stream.write_all(serialized_register.as_bytes()).await?;
+    println!("Sent validator registration: {:?}", register_message);
+
     loop {
         let mut length_buffer = [0; 4];
-        if stream.read_exact(&mut length_buffer).await.is_err() {
-            eprintln!("Failed to read message length");
+        if let Err(e) = stream.read_exact(&mut length_buffer).await {
+            eprintln!("Failed to read message length: {}", e);
             break;
         }
 
         let message_length = u32::from_be_bytes(length_buffer) as usize;
         let mut buffer = vec![0; message_length];
 
-        if stream.read_exact(&mut buffer).await.is_err() {
-            eprintln!("Failed to read message data");
+        if let Err(e) = stream.read_exact(&mut buffer).await {
+            eprintln!("Failed to read message data: {}", e);
             break;
         }
 
@@ -98,6 +115,9 @@ async fn main() -> io::Result<()> {
             },
             Ok(Message::ConsensusVote(block)) => {
                 println!("Received Consensus Vote for Block: {:?}", block);
+            },
+            Ok(Message::RegisterValidator(_)) => {
+                // Ignore RegisterValidator messages
             },
             Ok(Message::RetransmissionRequest(_)) => {
                 continue;
