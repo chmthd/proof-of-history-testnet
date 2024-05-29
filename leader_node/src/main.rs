@@ -1,6 +1,6 @@
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use sha2::{Sha256, Digest};
 use serde::{Serialize, Deserialize};
 use std::sync::Arc;
@@ -46,6 +46,7 @@ enum MonitorMessage {
 struct PoHGenerator {
     poh: Arc<Mutex<Vec<PohEntry>>>,
     validators: Arc<Mutex<HashMap<String, usize>>>,
+    votes: Arc<Mutex<HashMap<String, bool>>>,
 }
 
 impl PoHGenerator {
@@ -53,6 +54,7 @@ impl PoHGenerator {
         PoHGenerator {
             poh: Arc::new(Mutex::new(Vec::new())),
             validators: Arc::new(Mutex::new(HashMap::new())),
+            votes: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -90,7 +92,7 @@ impl PoHGenerator {
         });
     }
 
-    async fn handle_connection(mut stream: TcpStream, poh: Arc<Mutex<Vec<PohEntry>>>, validators: Arc<Mutex<HashMap<String, usize>>>) {
+    async fn handle_connection(mut stream: TcpStream, poh: Arc<Mutex<Vec<PohEntry>>>, validators: Arc<Mutex<HashMap<String, usize>>>, votes: Arc<Mutex<HashMap<String, bool>>>) {
         let peer_addr = stream.peer_addr().unwrap().to_string();
         {
             let mut validators = validators.lock().await;
@@ -100,20 +102,38 @@ impl PoHGenerator {
         println!("New validator connected: {}", peer_addr);
 
         loop {
-            {
-                let poh = poh.lock().await;
-                let serialized = serde_json::to_string(&Message::PoHEntries(poh.clone())).unwrap();
-                let message_length = (serialized.len() as u32).to_be_bytes();
-
-                if let Err(_e) = stream.write_all(&message_length).await {
-                    break;
-                }
-                if let Err(_e) = stream.write_all(serialized.as_bytes()).await {
-                    break;
-                }
-                println!("Sent PoH entries to {}", peer_addr);
+            let mut length_buffer = [0; 4];
+            if let Err(_e) = stream.read_exact(&mut length_buffer).await {
+                break;
             }
-            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+            let message_length = u32::from_be_bytes(length_buffer) as usize;
+            let mut buffer = vec![0; message_length];
+            if let Err(_e) = stream.read_exact(&mut buffer).await {
+                break;
+            }
+
+            match serde_json::from_slice::<Message>(&buffer) {
+                Ok(Message::ConsensusVote(block)) => {
+                    println!("Received consensus vote for block {:?}", block);
+                    let mut votes = votes.lock().await;
+                    votes.insert(peer_addr.clone(), true);  // Simplified: assuming all votes are true for this example
+                    send_monitor_message(MonitorMessage::ConsensusVote).await;
+                },
+                Ok(_) => {
+                    let poh = poh.lock().await;
+                    let serialized = serde_json::to_string(&Message::PoHEntries(poh.clone())).unwrap();
+                    let message_length = (serialized.len() as u32).to_be_bytes();
+
+                    if let Err(_e) = stream.write_all(&message_length).await {
+                        break;
+                    }
+                    if let Err(_e) = stream.write_all(serialized.as_bytes()).await {
+                        break;
+                    }
+                    println!("Sent PoH entries to {}", peer_addr);
+                },
+                Err(e) => println!("Failed to parse message: {}", e),
+            }
         }
         {
             let mut validators = validators.lock().await;
@@ -131,14 +151,15 @@ impl PoHGenerator {
             let (socket, _) = listener.accept().await.unwrap();
             let poh_clone = Arc::clone(&self.poh);
             let validators_clone = Arc::clone(&self.validators);
+            let votes_clone = Arc::clone(&self.votes);
             tokio::spawn(async move {
-                PoHGenerator::handle_connection(socket, poh_clone, validators_clone).await;
+                PoHGenerator::handle_connection(socket, poh_clone, validators_clone, votes_clone).await;
             });
         }
     }
 }
 
-async fn propose_block(poh: Arc<Mutex<Vec<PohEntry>>>, validators: Arc<Mutex<HashMap<String, usize>>>) {
+async fn propose_block(poh: Arc<Mutex<Vec<PohEntry>>>, validators: Arc<Mutex<HashMap<String, usize>>>, votes: Arc<Mutex<HashMap<String, bool>>>) {
     loop {
         tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
 
@@ -156,6 +177,10 @@ async fn propose_block(poh: Arc<Mutex<Vec<PohEntry>>>, validators: Arc<Mutex<Has
         println!("Proposing new block");
 
         let validators = validators.lock().await;
+        {
+            let mut votes = votes.lock().await;
+            votes.clear();  // Clear previous votes
+        }
         for (addr, _) in validators.iter() {
             if let Ok(mut stream) = tokio::net::TcpStream::connect(addr).await {
                 let serialized_block = serde_json::to_string(&Message::BlockProposal(block.clone())).unwrap();
@@ -189,6 +214,6 @@ async fn main() {
     let poh_generator = Arc::new(PoHGenerator::new());
     let poh_generator_clone = Arc::clone(&poh_generator);
     poh_generator.start();
-    tokio::spawn(propose_block(Arc::clone(&poh_generator_clone.poh), Arc::clone(&poh_generator_clone.validators)));
+    tokio::spawn(propose_block(Arc::clone(&poh_generator_clone.poh), Arc::clone(&poh_generator_clone.validators), Arc::clone(&poh_generator_clone.votes)));
     poh_generator_clone.start_server().await;
 }
