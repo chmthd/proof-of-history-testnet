@@ -1,6 +1,6 @@
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
-use tokio::io::{AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use sha2::{Sha256, Digest};
 use serde::{Serialize, Deserialize};
 use std::sync::Arc;
@@ -37,11 +37,10 @@ enum Message {
 
 #[derive(Serialize, Deserialize, Debug)]
 enum MonitorMessage {
-    NewEntry,
-    ValidatorConnected,
-    ValidatorDisconnected,
+    CurrentBlock(u64),
     BlockProposal,
     ConsensusVote,
+    ValidatorUpdate(Vec<String>),
 }
 
 struct PoHGenerator {
@@ -57,7 +56,7 @@ impl PoHGenerator {
         }
     }
 
-    fn start(&self) {
+    fn start(self: Arc<Self>) {
         let poh_clone = Arc::clone(&self.poh);
         task::spawn(async move {
             let mut prev_hash = vec![0; 32];
@@ -82,9 +81,9 @@ impl PoHGenerator {
                     poh.push(entry);
                     prev_hash = result.clone();
                     println!("Generated entry at timestamp {}", timestamp);
-
-                    send_monitor_message(MonitorMessage::NewEntry).await;
                 }
+
+                send_monitor_message(MonitorMessage::CurrentBlock(timestamp)).await;
 
                 tokio::time::sleep(tokio::time::Duration::from_millis(400)).await;
             }
@@ -93,9 +92,12 @@ impl PoHGenerator {
 
     async fn handle_connection(mut stream: TcpStream, poh: Arc<Mutex<Vec<PohEntry>>>, validators: Arc<Mutex<HashMap<String, usize>>>) {
         let peer_addr = stream.peer_addr().unwrap().to_string();
-        validators.lock().await.insert(peer_addr.clone(), 0);
+        {
+            let mut validators = validators.lock().await;
+            validators.insert(peer_addr.clone(), 0);
+            send_monitor_message(MonitorMessage::ValidatorUpdate(validators.keys().cloned().collect())).await;
+        }
         println!("New validator connected: {}", peer_addr);
-        send_monitor_message(MonitorMessage::ValidatorConnected).await;
 
         loop {
             {
@@ -113,11 +115,15 @@ impl PoHGenerator {
             }
             tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
         }
+        {
+            let mut validators = validators.lock().await;
+            validators.remove(&peer_addr);
+            send_monitor_message(MonitorMessage::ValidatorUpdate(validators.keys().cloned().collect())).await;
+        }
         println!("Validator disconnected: {}", peer_addr);
-        send_monitor_message(MonitorMessage::ValidatorDisconnected).await;
     }
 
-    async fn start_server(&self) {
+    async fn start_server(self: Arc<Self>) {
         let listener = TcpListener::bind("127.0.0.1:8080").await.unwrap();
         println!("Server running on 127.0.0.1:8080");
 
@@ -148,8 +154,7 @@ async fn propose_block(poh: Arc<Mutex<Vec<PohEntry>>>, validators: Arc<Mutex<Has
         };
 
         println!("Proposing new block");
-        send_monitor_message(MonitorMessage::BlockProposal).await;
-        
+
         let validators = validators.lock().await;
         for (addr, _) in validators.iter() {
             if let Ok(mut stream) = tokio::net::TcpStream::connect(addr).await {
@@ -164,6 +169,8 @@ async fn propose_block(poh: Arc<Mutex<Vec<PohEntry>>>, validators: Arc<Mutex<Has
                 println!("Proposed block to {}", addr);
             }
         }
+
+        send_monitor_message(MonitorMessage::BlockProposal).await;
     }
 }
 
@@ -179,8 +186,9 @@ async fn send_monitor_message(message: MonitorMessage) {
 
 #[tokio::main]
 async fn main() {
-    let poh_generator = PoHGenerator::new();
+    let poh_generator = Arc::new(PoHGenerator::new());
+    let poh_generator_clone = Arc::clone(&poh_generator);
     poh_generator.start();
-    tokio::spawn(propose_block(Arc::clone(&poh_generator.poh), Arc::clone(&poh_generator.validators)));
-    poh_generator.start_server().await;
+    tokio::spawn(propose_block(Arc::clone(&poh_generator_clone.poh), Arc::clone(&poh_generator_clone.validators)));
+    poh_generator_clone.start_server().await;
 }
