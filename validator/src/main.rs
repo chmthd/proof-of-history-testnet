@@ -5,14 +5,14 @@ use sha2::{Sha256, Digest};
 use rand::seq::IteratorRandom;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
-use validator::poh_handler::{PohEntry, validate_poh_entries}; // Correct import
-use validator::transaction::Transaction; // Correct import
+use validator::poh_handler::{PohEntry, validate_poh_entries};
+use validator::transaction::{Transaction, create_transaction};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct Block {
     poh_entries: Vec<PohEntry>,
     block_hash: Vec<u8>,
-    transactions: Vec<Transaction>, // Add transactions to the block structure
+    transactions: Vec<Transaction>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -28,7 +28,7 @@ enum Message {
     BlockProposal(Block),
     ConsensusVote(Block),
     RegisterValidator(Validator),
-    Transaction(Transaction), // Add Transaction message type
+    Transaction(Transaction),
 }
 
 async fn gossip_message(message: &Message, peer_addrs: &Vec<String>) {
@@ -62,6 +62,21 @@ async fn main() -> io::Result<()> {
     stream.write_all(&(serialized_register.len() as u32).to_be_bytes()).await?;
     stream.write_all(serialized_register.as_bytes()).await?;
     println!("Registered validator");
+
+    let mut transactions = Vec::new();
+
+    // Create a sample transaction and send it to the leader node
+    let sample_transaction = create_transaction(
+        "validator_1".to_string(),
+        "recipient_1".to_string(),
+        100,
+        vec![1, 2, 3, 4]
+    );
+    let transaction_message = Message::Transaction(sample_transaction.clone());
+    let serialized_transaction = serde_json::to_string(&transaction_message).unwrap();
+    stream.write_all(&(serialized_transaction.len() as u32).to_be_bytes()).await?;
+    stream.write_all(serialized_transaction.as_bytes()).await?;
+    println!("Sent transaction to leader");
 
     loop {
         let mut length_buffer = [0; 4];
@@ -103,7 +118,12 @@ async fn main() -> io::Result<()> {
             },
             Ok(Message::Transaction(transaction)) => {
                 println!("Received transaction: {:?}", transaction);
-                gossip_message(&Message::Transaction(transaction), &peer_addrs).await;
+                if transaction.validate() {
+                    transactions.push(transaction.clone());
+                    gossip_message(&Message::Transaction(transaction), &peer_addrs).await;
+                } else {
+                    println!("Invalid transaction received");
+                }
             },
             _ => {},
         }

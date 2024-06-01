@@ -1,29 +1,33 @@
-use tokio::task;
-use tokio::net::TcpListener;
+use validator::poh_handler::PohEntry;
+use validator::transaction::Transaction;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tokio::net::TcpListener;
 use sha2::{Sha256, Digest};
 use std::time::{SystemTime, UNIX_EPOCH};
-use validator::poh_handler::PohEntry; // Correct import
+use std::collections::HashMap;
 
+#[derive(Debug)]
 pub struct PoHGenerator {
     pub poh: Arc<Mutex<Vec<PohEntry>>>,
-    pub validators: Arc<Mutex<std::collections::HashMap<String, usize>>>,
-    pub votes: Arc<Mutex<std::collections::HashMap<String, bool>>>,
+    pub validators: Arc<Mutex<HashMap<String, usize>>>,
+    pub votes: Arc<Mutex<HashMap<String, bool>>>,
+    pub transactions: Arc<Mutex<Vec<Transaction>>>,
 }
 
 impl PoHGenerator {
     pub fn new() -> Self {
         PoHGenerator {
             poh: Arc::new(Mutex::new(Vec::new())),
-            validators: Arc::new(Mutex::new(std::collections::HashMap::new())),
-            votes: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            validators: Arc::new(Mutex::new(HashMap::new())),
+            votes: Arc::new(Mutex::new(HashMap::new())),
+            transactions: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
     pub fn start(self: Arc<Self>) {
         let poh_clone = Arc::clone(&self.poh);
-        task::spawn(async move {
+        tokio::spawn(async move {
             let mut prev_hash = vec![0; 32];
 
             loop {
@@ -62,8 +66,9 @@ impl PoHGenerator {
             let poh_clone = Arc::clone(&self.poh);
             let validators_clone = Arc::clone(&self.validators);
             let votes_clone = Arc::clone(&self.votes);
+            let transactions_clone = Arc::clone(&self.transactions);
             tokio::spawn(async move {
-                crate::network::handle_connection(socket, poh_clone, validators_clone, votes_clone).await;
+                crate::network::handle_connection(socket, poh_clone, validators_clone, votes_clone, transactions_clone).await;
             });
         }
     }

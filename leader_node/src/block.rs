@@ -1,9 +1,9 @@
-use tokio::io::AsyncWriteExt;
-use validator::poh_handler::PohEntry; // Correct import
+use validator::poh_handler::PohEntry;
+use validator::transaction::Transaction;
 use crate::manager::Validator;
-use validator::transaction::Transaction; // Correct import from validator crate
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tokio::io::AsyncWriteExt;
 use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -27,7 +27,7 @@ pub async fn propose_block(
     poh: Arc<Mutex<Vec<PohEntry>>>,
     validators: Arc<Mutex<std::collections::HashMap<String, usize>>>,
     votes: Arc<Mutex<std::collections::HashMap<String, bool>>>,
-    transactions: Arc<Mutex<Vec<Transaction>>>
+    transactions: Arc<Mutex<Vec<Transaction>>>,
 ) {
     loop {
         tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
@@ -38,16 +38,16 @@ pub async fn propose_block(
             poh_entries = poh.clone();
         }
 
-        let transactions_vec;
+        let transaction_list;
         {
             let txs = transactions.lock().await;
-            transactions_vec = txs.clone();
+            transaction_list = txs.clone();
         }
 
         let block = Block {
             poh_entries: poh_entries.clone(),
             block_hash: vec![0; 32],
-            transactions: transactions_vec.clone(),
+            transactions: transaction_list,
         };
 
         println!("Proposing new block");
@@ -55,7 +55,7 @@ pub async fn propose_block(
         let validators = validators.lock().await;
         {
             let mut votes = votes.lock().await;
-            votes.clear();  // Clear previous votes
+            votes.clear(); // Clear previous votes
         }
         for (addr, _) in validators.iter() {
             if let Ok(mut stream) = tokio::net::TcpStream::connect(addr).await {
