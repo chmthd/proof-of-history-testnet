@@ -5,17 +5,14 @@ use sha2::{Sha256, Digest};
 use rand::seq::IteratorRandom;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct PohEntry {
-    timestamp: u64,
-    hash: Vec<u8>,
-}
+use validator::poh_handler::{PohEntry, validate_poh_entries}; // Correct import
+use validator::transaction::Transaction; // Correct import
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct Block {
     poh_entries: Vec<PohEntry>,
     block_hash: Vec<u8>,
+    transactions: Vec<Transaction>, // Add transactions to the block structure
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -31,29 +28,7 @@ enum Message {
     BlockProposal(Block),
     ConsensusVote(Block),
     RegisterValidator(Validator),
-}
-
-fn validate_poh_entries(poh_entries: &Vec<PohEntry>) -> Result<(), usize> {
-    for i in 1..poh_entries.len() {
-        let prev_entry = &poh_entries[i - 1];
-        let curr_entry = &poh_entries[i];
-
-        let mut hasher = Sha256::new();
-        let timestamp_bytes = curr_entry.timestamp.to_be_bytes();
-
-        hasher.update(&prev_entry.hash);
-        hasher.update(&timestamp_bytes);
-        let expected_hash = hasher.finalize_reset().to_vec();
-
-        if curr_entry.hash != expected_hash {
-            println!(
-                "Validation failed at index {}: expected={:?}, got={:?}",
-                i, expected_hash, curr_entry.hash
-            );
-            return Err(i);
-        }
-    }
-    Ok(())
+    Transaction(Transaction), // Add Transaction message type
 }
 
 async fn gossip_message(message: &Message, peer_addrs: &Vec<String>) {
@@ -125,6 +100,10 @@ async fn main() -> io::Result<()> {
             Ok(Message::ConsensusVote(block)) => {
                 println!("Received consensus vote");
                 gossip_message(&Message::ConsensusVote(block), &peer_addrs).await;
+            },
+            Ok(Message::Transaction(transaction)) => {
+                println!("Received transaction: {:?}", transaction);
+                gossip_message(&Message::Transaction(transaction), &peer_addrs).await;
             },
             _ => {},
         }

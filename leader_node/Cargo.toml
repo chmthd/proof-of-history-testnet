@@ -1,5 +1,5 @@
 [package]
-name = "poh_node"
+name = "leader_node"
 version = "0.1.0"
 edition = "2021"
 
@@ -11,11 +11,8 @@ serde_json = "1.0"
 rand = "0.8"
 env_logger = "0.9"
 log = "0.4"
+validator = { path = "../validator" }
 
 [[bin]]
-name = "poh_node"
+name = "leader_node"
 path = "src/main.rs"
-
-[[bin]]
-name = "monitor"
-path = "src/monitor.rs"

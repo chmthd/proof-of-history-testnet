@@ -1,5 +1,5 @@
 [package]
-name = "client"
+name = "validator"
 version = "0.1.0"
 edition = "2021"
 
@@ -10,4 +10,6 @@ serde_json = "1.0"
 sha2 = "0.9.8"
 rand = "0.8"
 
-
+[lib]
+name = "validator"
+path = "src/lib.rs"
