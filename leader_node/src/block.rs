@@ -1,10 +1,12 @@
-use validator::poh_handler::PohEntry;
-use validator::transaction::Transaction;
-use crate::manager::Validator;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tokio::io::AsyncWriteExt;
+use validator::poh_handler::PohEntry;
+use validator::transaction::Transaction;
+use validator::registration::Validator;
+use crate::network::Stake;
 use serde::{Serialize, Deserialize};
+use std::collections::HashMap;
+use tokio::io::AsyncWriteExt;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Block {
@@ -16,58 +18,52 @@ pub struct Block {
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Message {
     PoHEntries(Vec<PohEntry>),
-    RetransmissionRequest(usize),
     BlockProposal(Block),
     ConsensusVote(Block),
     RegisterValidator(Validator),
+    StakeTokens(Stake),
     Transaction(Transaction),
 }
 
 pub async fn propose_block(
     poh: Arc<Mutex<Vec<PohEntry>>>,
-    validators: Arc<Mutex<std::collections::HashMap<String, usize>>>,
-    votes: Arc<Mutex<std::collections::HashMap<String, bool>>>,
+    validators: Arc<Mutex<HashMap<String, usize>>>,
+    _votes: Arc<Mutex<HashMap<String, bool>>>,
     transactions: Arc<Mutex<Vec<Transaction>>>,
 ) {
     loop {
         tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
 
         let poh_entries;
+        let block_transactions;
         {
-            let poh = poh.lock().await;
-            poh_entries = poh.clone();
+            let poh_guard = poh.lock().await;
+            poh_entries = poh_guard.clone();
         }
-
-        let transaction_list;
         {
-            let txs = transactions.lock().await;
-            transaction_list = txs.clone();
+            let txs_guard = transactions.lock().await;
+            block_transactions = txs_guard.clone();
         }
 
         let block = Block {
-            poh_entries: poh_entries.clone(),
+            poh_entries,
             block_hash: vec![0; 32],
-            transactions: transaction_list,
+            transactions: block_transactions,
         };
 
-        println!("Proposing new block");
+        println!("Proposing new block: {:?}", block);
 
-        let validators = validators.lock().await;
-        {
-            let mut votes = votes.lock().await;
-            votes.clear(); // Clear previous votes
-        }
-        for (addr, _) in validators.iter() {
-            if let Ok(mut stream) = tokio::net::TcpStream::connect(addr).await {
-                let serialized_block = serde_json::to_string(&Message::BlockProposal(block.clone())).unwrap();
-                let message_length = (serialized_block.len() as u32).to_be_bytes();
-                if let Err(_e) = stream.write_all(&message_length).await {
-                    continue;
+        let serialized_block = serde_json::to_string(&Message::BlockProposal(block.clone())).unwrap();
+        let message_length = (serialized_block.len() as u32).to_be_bytes();
+
+        // Gossip the block proposal
+        for validator in validators.lock().await.keys() {
+            if let Ok(mut stream) = tokio::net::TcpStream::connect(validator).await {
+                if stream.write_all(&message_length).await.is_ok() {
+                    if stream.write_all(serialized_block.as_bytes()).await.is_ok() {
+                        println!("Sent block proposal to {}", validator);
+                    }
                 }
-                if let Err(_e) = stream.write_all(&serialized_block.clone().into_bytes()).await {
-                    continue;
-                }
-                println!("Proposed block to {}", addr);
             }
         }
     }

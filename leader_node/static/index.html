@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Testnet Monitor</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+        }
+        .container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        .status-box {
+            border: 1px solid #ccc;
+            padding: 20px;
+            width: 300px;
+            text-align: center;
+        }
+        .status {
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="status-box">
+            <h1>Proof of History Testnet Monitor</h1>
+            <div class="status" id="proof_of_history">Proof of History: N/A</div>
+            <div class="status" id="validator_count">Validators: N/A</div>
+            <div class="status" id="block_proposals">Block Proposals: N/A</div>
+            <div class="status" id="block_validations">Block Validations: N/A</div>
+            <div class="status" id="block_generation">Block Generation: N/A</div>
+            <div class="status" id="gossip_protocol">Gossip Protocol: N/A</div>
+            <div class="status" id="transactions">Transactions: N/A</div>
+            <div class="status" id="proof_of_stake">Proof of Stake: N/A</div>
+            <div class="status" id="leader_election">Leader Election: N/A</div>
+        </div>
+    </div>
+    <script>
+        async function fetchStatus() {
+            try {
+                const response = await fetch('/status');
+                const status = await response.json();
+                document.getElementById('proof_of_history').innerText = 'Proof of History: ' + (status.proof_of_history ? 'Yes' : 'No');
+                document.getElementById('validator_count').innerText = 'Validators: ' + status.validator_count;
+                document.getElementById('block_proposals').innerText = 'Block Proposals: ' + status.block_proposals;
+                document.getElementById('block_validations').innerText = 'Block Validations: ' + status.block_validations;
+                document.getElementById('block_generation').innerText = 'Block Generation: ' + status.block_generation;
+                document.getElementById('gossip_protocol').innerText = 'Gossip Protocol: ' + (status.gossip_protocol ? 'Yes' : 'No');
+                document.getElementById('transactions').innerText = 'Transactions: ' + status.transactions;
+                document.getElementById('proof_of_stake').innerText = 'Proof of Stake: ' + (status.proof_of_stake ? 'Yes' : 'No');
+                document.getElementById('leader_election').innerText = 'Leader Election: ' + (status.leader_election ? 'Yes' : 'No');
+            } catch (e) {
+                console.error('Failed to fetch status:', e);
+            }
+        }
+
+        setInterval(fetchStatus, 2000);
+    </script>
+</body>
+</html>

@@ -2,10 +2,11 @@ use validator::poh_handler::PohEntry;
 use validator::transaction::Transaction;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tokio::net::TcpListener;
 use sha2::{Sha256, Digest};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::collections::HashMap;
+use tokio::net::TcpListener;
+use crate::election::LeaderElection;
 
 #[derive(Debug)]
 pub struct PoHGenerator {
@@ -13,48 +14,50 @@ pub struct PoHGenerator {
     pub validators: Arc<Mutex<HashMap<String, usize>>>,
     pub votes: Arc<Mutex<HashMap<String, bool>>>,
     pub transactions: Arc<Mutex<Vec<Transaction>>>,
+    pub stakes: Arc<Mutex<HashMap<String, u64>>>,
+    pub leader_election: LeaderElection,
 }
 
 impl PoHGenerator {
     pub fn new() -> Self {
+        let stakes = Arc::new(Mutex::new(HashMap::new()));
         PoHGenerator {
             poh: Arc::new(Mutex::new(Vec::new())),
             validators: Arc::new(Mutex::new(HashMap::new())),
             votes: Arc::new(Mutex::new(HashMap::new())),
             transactions: Arc::new(Mutex::new(Vec::new())),
+            stakes: Arc::new(Mutex::new(HashMap::new())),
+            leader_election: LeaderElection::new(Arc::clone(&stakes)),
         }
     }
 
-    pub fn start(self: Arc<Self>) {
-        let poh_clone = Arc::clone(&self.poh);
-        tokio::spawn(async move {
-            let mut prev_hash = vec![0; 32];
+    pub async fn generate_poh_entry(self: Arc<Self>) {
+        let mut prev_hash = vec![0; 32];
 
-            loop {
-                let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        loop {
+            let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
 
-                let mut hasher = Sha256::new();
-                let timestamp_bytes = timestamp.to_be_bytes();
+            let mut hasher = Sha256::new();
+            let timestamp_bytes = timestamp.to_be_bytes();
 
-                hasher.update(&prev_hash);
-                hasher.update(&timestamp_bytes);
-                let result = hasher.finalize_reset().to_vec();
+            hasher.update(&prev_hash);
+            hasher.update(&timestamp_bytes);
+            let result = hasher.finalize_reset().to_vec();
 
-                let entry = PohEntry {
-                    timestamp,
-                    hash: result.clone(),
-                };
+            let entry = PohEntry {
+                timestamp,
+                hash: result.clone(),
+            };
 
-                {
-                    let mut poh = poh_clone.lock().await;
-                    poh.push(entry);
-                    prev_hash = result.clone();
-                    println!("Generated entry at timestamp {}", timestamp);
-                }
-
-                tokio::time::sleep(tokio::time::Duration::from_millis(400)).await;
+            {
+                let mut poh = self.poh.lock().await;
+                poh.push(entry);
+                prev_hash = result.clone();
+                println!("Generated entry at timestamp {}", timestamp);
             }
-        });
+
+            tokio::time::sleep(tokio::time::Duration::from_millis(400)).await;
+        }
     }
 
     pub async fn start_server(self: Arc<Self>) {
@@ -67,9 +70,12 @@ impl PoHGenerator {
             let validators_clone = Arc::clone(&self.validators);
             let votes_clone = Arc::clone(&self.votes);
             let transactions_clone = Arc::clone(&self.transactions);
+            let stakes_clone = Arc::clone(&self.stakes);
             tokio::spawn(async move {
-                crate::network::handle_connection(socket, poh_clone, validators_clone, votes_clone, transactions_clone).await;
+                crate::network::handle_connection(socket, poh_clone, validators_clone, votes_clone, transactions_clone, stakes_clone).await;
             });
+
+            tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
         }
     }
 }
