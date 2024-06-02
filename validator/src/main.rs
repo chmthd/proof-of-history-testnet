@@ -30,7 +30,7 @@ enum Message {
     ConsensusVote(Block),
     RegisterValidator(Validator),
     Transaction(Transaction),
-    GossipMessage(String), // Example of a simple gossip message
+    GossipMessage(String), 
 }
 
 async fn gossip_message(message: &Message, peer_addrs: &Vec<String>) {
@@ -56,7 +56,7 @@ async fn main() -> io::Result<()> {
     let mut rng = rand::thread_rng();
     let validator_id = format!("validator_{}", rng.gen::<u32>());
     let mut stream = TcpStream::connect("127.0.0.1:8080").await?;
-    let peer_addrs = vec!["127.0.0.1:8081".to_string(), "127.0.0.1:8082".to_string()]; // Add peers' addresses here
+    let peer_addrs = vec!["127.0.0.1:8081".to_string(), "127.0.0.1:8082".to_string()]; 
 
     let register_message = Message::RegisterValidator(Validator {
         id: validator_id.clone(),

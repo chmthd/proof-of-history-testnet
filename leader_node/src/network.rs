@@ -19,7 +19,7 @@ pub enum Message {
     StakeTokens(Stake),
     RegisterValidator(Validator),
     Transaction(Transaction),
-    GossipMessage(String), // Example of a simple gossip message
+    GossipMessage(String), 
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -35,7 +35,7 @@ pub async fn handle_connection(
     votes: Arc<Mutex<HashMap<String, bool>>>,
     transactions: Arc<Mutex<Vec<Transaction>>>,
     stakes: Arc<Mutex<HashMap<String, u64>>>,
-    gossip_activity: Arc<Mutex<GossipActivity>>, // Track gossip activity
+    gossip_activity: Arc<Mutex<GossipActivity>>, 
 ) {
     let mut length_buffer = [0; 4];
     if let Err(_e) = stream.read_exact(&mut length_buffer).await {
@@ -62,10 +62,9 @@ pub async fn handle_connection(
         }
     };
 
-    // Mint random tokens for the new validator
+    // Mint tokens for the new validator
     let mut rng = StdRng::from_entropy();
-    let random_tokens: u64 = rng.gen_range(1000..10000); // Mint between 1000 to 10000 tokens
-
+    let random_tokens: u64 = rng.gen_range(1000..10000); 
     {
         let mut stakes = stakes.lock().await;
         stakes.insert(validator_id.clone(), random_tokens);
@@ -142,7 +141,7 @@ pub async fn start_server(
     votes: Arc<Mutex<HashMap<String, bool>>>,
     transactions: Arc<Mutex<Vec<Transaction>>>,
     stakes: Arc<Mutex<HashMap<String, u64>>>,
-    gossip_activity: Arc<Mutex<GossipActivity>>, // Track gossip activity
+    gossip_activity: Arc<Mutex<GossipActivity>>,
 ) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:8080").await.unwrap();
     println!("Server listening on port 8080");
