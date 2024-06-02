@@ -37,12 +37,30 @@ pub async fn handle_connection(
     stakes: Arc<Mutex<HashMap<String, u64>>>,
     gossip_activity: Arc<Mutex<GossipActivity>>, // Track gossip activity
 ) {
-    let peer_addr = stream.peer_addr().unwrap().to_string();
-    {
-        let mut validators = validators.lock().await;
-        validators.insert(peer_addr.clone(), 0);
-        println!("New validator connected: {}", peer_addr);
+    let mut length_buffer = [0; 4];
+    if let Err(_e) = stream.read_exact(&mut length_buffer).await {
+        println!("Failed to read length buffer");
+        return;
     }
+    let message_length = u32::from_be_bytes(length_buffer) as usize;
+    let mut buffer = vec![0; message_length];
+    if let Err(_e) = stream.read_exact(&mut buffer).await {
+        println!("Failed to read buffer");
+        return;
+    }
+
+    let validator_id = match serde_json::from_slice::<Message>(&buffer) {
+        Ok(Message::RegisterValidator(validator)) => {
+            let mut validators = validators.lock().await;
+            validators.insert(validator.id.clone(), 0);
+            println!("Registered validator: {}", validator.id);
+            validator.id.clone()
+        }
+        _ => {
+            println!("First message must be RegisterValidator");
+            return;
+        }
+    };
 
     // Mint random tokens for the new validator
     let mut rng = StdRng::from_entropy();
@@ -50,25 +68,27 @@ pub async fn handle_connection(
 
     {
         let mut stakes = stakes.lock().await;
-        stakes.insert(peer_addr.clone(), random_tokens);
-        println!("Minted {} tokens for validator {}", random_tokens, peer_addr);
+        stakes.insert(validator_id.clone(), random_tokens);
+        println!("Minted {} tokens for validator {}", random_tokens, validator_id);
     }
 
     loop {
         let mut length_buffer = [0; 4];
         if let Err(_e) = stream.read_exact(&mut length_buffer).await {
+            println!("Failed to read length buffer in loop");
             break;
         }
         let message_length = u32::from_be_bytes(length_buffer) as usize;
         let mut buffer = vec![0; message_length];
         if let Err(_e) = stream.read_exact(&mut buffer).await {
+            println!("Failed to read buffer in loop");
             break;
         }
 
         match serde_json::from_slice::<Message>(&buffer) {
             Ok(Message::ConsensusVote(block)) => {
                 let mut votes = votes.lock().await;
-                votes.insert(peer_addr.clone(), true);
+                votes.insert(validator_id.clone(), true);
                 println!("Received consensus vote for block {:?}", block);
             }
             Ok(Message::PoHEntries(_)) => {
@@ -76,22 +96,20 @@ pub async fn handle_connection(
                 let serialized = serde_json::to_string(&Message::PoHEntries(poh.clone())).unwrap();
                 let message_length = (serialized.len() as u32).to_be_bytes();
                 if let Err(_e) = stream.write_all(&message_length).await {
+                    println!("Failed to send length buffer in loop");
                     break;
                 }
                 if let Err(_e) = stream.write_all(serialized.as_bytes()).await {
+                    println!("Failed to send buffer in loop");
                     break;
                 }
-                println!("Sent PoH entries to {}", peer_addr);
+                println!("Sent PoH entries to {}", validator_id);
             }
             Ok(Message::StakeTokens(stake)) => {
                 let mut stakes = stakes.lock().await;
                 let entry = stakes.entry(stake.validator_id.clone()).or_insert(0);
                 *entry += stake.amount;
                 println!("Staked {} tokens for validator {}", stake.amount, stake.validator_id);
-            }
-            Ok(Message::RegisterValidator(_validator)) => {
-                println!("Received RegisterValidator message");
-                // Handle validator registration
             }
             Ok(Message::Transaction(transaction)) => {
                 println!("Received Transaction message: {:?}", transaction);
@@ -102,7 +120,10 @@ pub async fn handle_connection(
                 // Update gossip activity
                 let mut gossip_activity = gossip_activity.lock().await;
                 gossip_activity.messages_received += 1;
-                println!("Received gossip message from {}", peer_addr);
+                println!("Received gossip message from {}", validator_id);
+            }
+            Ok(Message::RegisterValidator(_validator)) => {
+                println!("Validator {} is already registered", validator_id);
             }
             Err(e) => println!("Failed to parse message: {}", e),
         }
@@ -110,8 +131,8 @@ pub async fn handle_connection(
 
     {
         let mut validators = validators.lock().await;
-        validators.remove(&peer_addr);
-        println!("Validator disconnected: {}", peer_addr);
+        validators.remove(&validator_id);
+        println!("Validator disconnected: {}", validator_id);
     }
 }
 
@@ -146,4 +167,3 @@ pub struct GossipActivity {
     pub messages_sent: usize,
     pub messages_received: usize,
 }
-

@@ -5,6 +5,7 @@ use sha2::{Sha256, Digest};
 use rand::seq::IteratorRandom;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::Rng;
 use validator::poh_handler::{PohEntry, validate_poh_entries};
 use validator::transaction::{Transaction, create_transaction};
 
@@ -29,6 +30,7 @@ enum Message {
     ConsensusVote(Block),
     RegisterValidator(Validator),
     Transaction(Transaction),
+    GossipMessage(String), // Example of a simple gossip message
 }
 
 async fn gossip_message(message: &Message, peer_addrs: &Vec<String>) {
@@ -51,23 +53,25 @@ async fn gossip_message(message: &Message, peer_addrs: &Vec<String>) {
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
+    let mut rng = rand::thread_rng();
+    let validator_id = format!("validator_{}", rng.gen::<u32>());
     let mut stream = TcpStream::connect("127.0.0.1:8080").await?;
     let peer_addrs = vec!["127.0.0.1:8081".to_string(), "127.0.0.1:8082".to_string()]; // Add peers' addresses here
 
     let register_message = Message::RegisterValidator(Validator {
-        id: "validator_1".to_string(),
+        id: validator_id.clone(),
         public_key: vec![1, 2, 3, 4, 5],
     });
     let serialized_register = serde_json::to_string(&register_message).unwrap();
     stream.write_all(&(serialized_register.len() as u32).to_be_bytes()).await?;
     stream.write_all(serialized_register.as_bytes()).await?;
-    println!("Registered validator");
+    println!("Registered validator with ID {}", validator_id);
 
     let mut transactions = Vec::new();
 
     // Create a sample transaction and send it to the leader node
     let sample_transaction = create_transaction(
-        "validator_1".to_string(),
+        validator_id.clone(),
         "recipient_1".to_string(),
         100,
         vec![1, 2, 3, 4]
