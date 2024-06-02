@@ -8,6 +8,9 @@ use validator::poh_handler::PohEntry;
 use validator::transaction::Transaction;
 use validator::registration::Validator;
 use crate::block::Block;
+use rand::Rng;
+use rand::rngs::StdRng;
+use rand::SeedableRng;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Message {
@@ -16,6 +19,7 @@ pub enum Message {
     StakeTokens(Stake),
     RegisterValidator(Validator),
     Transaction(Transaction),
+    GossipMessage(String), // Example of a simple gossip message
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -31,12 +35,23 @@ pub async fn handle_connection(
     votes: Arc<Mutex<HashMap<String, bool>>>,
     transactions: Arc<Mutex<Vec<Transaction>>>,
     stakes: Arc<Mutex<HashMap<String, u64>>>,
+    gossip_activity: Arc<Mutex<GossipActivity>>, // Track gossip activity
 ) {
     let peer_addr = stream.peer_addr().unwrap().to_string();
     {
         let mut validators = validators.lock().await;
         validators.insert(peer_addr.clone(), 0);
         println!("New validator connected: {}", peer_addr);
+    }
+
+    // Mint random tokens for the new validator
+    let mut rng = StdRng::from_entropy();
+    let random_tokens: u64 = rng.gen_range(1000..10000); // Mint between 1000 to 10000 tokens
+
+    {
+        let mut stakes = stakes.lock().await;
+        stakes.insert(peer_addr.clone(), random_tokens);
+        println!("Minted {} tokens for validator {}", random_tokens, peer_addr);
     }
 
     loop {
@@ -74,7 +89,7 @@ pub async fn handle_connection(
                 *entry += stake.amount;
                 println!("Staked {} tokens for validator {}", stake.amount, stake.validator_id);
             }
-            Ok(Message::RegisterValidator(validator)) => {
+            Ok(Message::RegisterValidator(_validator)) => {
                 println!("Received RegisterValidator message");
                 // Handle validator registration
             }
@@ -82,6 +97,12 @@ pub async fn handle_connection(
                 println!("Received Transaction message: {:?}", transaction);
                 let mut txs = transactions.lock().await;
                 txs.push(transaction);
+            }
+            Ok(Message::GossipMessage(_msg)) => {
+                // Update gossip activity
+                let mut gossip_activity = gossip_activity.lock().await;
+                gossip_activity.messages_received += 1;
+                println!("Received gossip message from {}", peer_addr);
             }
             Err(e) => println!("Failed to parse message: {}", e),
         }
@@ -100,6 +121,7 @@ pub async fn start_server(
     votes: Arc<Mutex<HashMap<String, bool>>>,
     transactions: Arc<Mutex<Vec<Transaction>>>,
     stakes: Arc<Mutex<HashMap<String, u64>>>,
+    gossip_activity: Arc<Mutex<GossipActivity>>, // Track gossip activity
 ) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:8080").await.unwrap();
     println!("Server listening on port 8080");
@@ -111,9 +133,17 @@ pub async fn start_server(
         let votes = Arc::clone(&votes);
         let transactions = Arc::clone(&transactions);
         let stakes = Arc::clone(&stakes);
+        let gossip_activity = Arc::clone(&gossip_activity);
 
         tokio::spawn(async move {
-            handle_connection(socket, poh, validators, votes, transactions, stakes).await;
+            handle_connection(socket, poh, validators, votes, transactions, stakes, gossip_activity).await;
         });
     }
 }
+
+#[derive(Default)]
+pub struct GossipActivity {
+    pub messages_sent: usize,
+    pub messages_received: usize,
+}
+

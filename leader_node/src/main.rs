@@ -7,6 +7,7 @@ use sha2::{Sha256, Digest};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::net::TcpListener;
 use crate::election::LeaderElection;
+use crate::network::GossipActivity;
 
 mod election;
 mod network;
@@ -20,6 +21,7 @@ struct PoHGenerator {
     transactions: Arc<Mutex<Vec<Transaction>>>,
     stakes: Arc<Mutex<HashMap<String, u64>>>,
     leader_election: LeaderElection,
+    current_leader: Arc<Mutex<Option<String>>>,
 }
 
 impl PoHGenerator {
@@ -32,6 +34,7 @@ impl PoHGenerator {
             transactions: Arc::new(Mutex::new(Vec::new())),
             stakes: Arc::clone(&stakes),
             leader_election: LeaderElection::new(Arc::clone(&stakes)),
+            current_leader: Arc::new(Mutex::new(None)), 
         }
     }
 
@@ -68,6 +71,8 @@ impl PoHGenerator {
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
             if let Some(leader) = self.leader_election.elect_leader().await {
+                let mut current_leader = self.current_leader.lock().await;
+                *current_leader = Some(leader.clone());
                 println!("New leader elected: {}", leader);
             } else {
                 println!("No leader elected.");
@@ -75,7 +80,7 @@ impl PoHGenerator {
         }
     }
 
-    pub async fn start_server(self: Arc<Self>) {
+    pub async fn start_server(self: Arc<Self>, gossip_activity: Arc<Mutex<GossipActivity>>) {
         let listener = TcpListener::bind("127.0.0.1:8080").await.unwrap();
         println!("Server running on 127.0.0.1:8080");
 
@@ -86,8 +91,9 @@ impl PoHGenerator {
             let votes_clone = Arc::clone(&self.votes);
             let transactions_clone = Arc::clone(&self.transactions);
             let stakes_clone = Arc::clone(&self.stakes);
+            let gossip_activity_clone = Arc::clone(&gossip_activity);
             tokio::spawn(async move {
-                crate::network::handle_connection(socket, poh_clone, validators_clone, votes_clone, transactions_clone, stakes_clone).await;
+                crate::network::handle_connection(socket, poh_clone, validators_clone, votes_clone, transactions_clone, stakes_clone, gossip_activity_clone).await;
             });
 
             tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
@@ -98,6 +104,7 @@ impl PoHGenerator {
 #[tokio::main]
 async fn main() {
     let poh_generator = Arc::new(PoHGenerator::new());
+    let gossip_activity = Arc::new(Mutex::new(GossipActivity::default()));
 
     tokio::spawn({
         let poh_generator = Arc::clone(&poh_generator);
@@ -120,8 +127,9 @@ async fn main() {
 
     tokio::spawn({
         let poh_generator = Arc::clone(&poh_generator);
+        let gossip_activity = Arc::clone(&gossip_activity);
         async move {
-            tester::start_test_monitor(Arc::clone(&poh_generator)).await;
+            tester::start_test_monitor(Arc::clone(&poh_generator), Arc::clone(&gossip_activity)).await;
         }
     });
 
@@ -132,5 +140,5 @@ async fn main() {
         }
     });
 
-    poh_generator.start_server().await;
+    poh_generator.start_server(Arc::clone(&gossip_activity)).await;
 }

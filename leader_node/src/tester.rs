@@ -4,7 +4,8 @@ use tokio::sync::Mutex;
 use warp::Filter;
 use std::time::Duration;
 
-use crate::{PoHGenerator};
+use crate::PoHGenerator;
+use crate::network::GossipActivity;
 
 #[derive(Serialize, Default)]
 struct TestStatus {
@@ -17,18 +18,21 @@ struct TestStatus {
     transactions: usize,
     proof_of_stake: bool,
     leader_election: bool,
+    total_circulating_supply: u64,
 }
 
 struct TestMonitor {
     status: Arc<Mutex<TestStatus>>,
     poh_generator: Arc<PoHGenerator>,
+    gossip_activity: Arc<Mutex<GossipActivity>>, // Track gossip activity
 }
 
 impl TestMonitor {
-    fn new(poh_generator: Arc<PoHGenerator>) -> Self {
+    fn new(poh_generator: Arc<PoHGenerator>, gossip_activity: Arc<Mutex<GossipActivity>>) -> Self {
         TestMonitor {
             status: Arc::new(Mutex::new(TestStatus::default())),
             poh_generator,
+            gossip_activity,
         }
     }
 
@@ -47,10 +51,14 @@ impl TestMonitor {
                 let poh_entries = self.poh_generator.poh.lock().await.len();
                 status.block_proposals = poh_entries; // Assuming each entry corresponds to a proposal
                 status.block_generation = poh_entries; // Assuming each entry corresponds to a block generation
+
+                // To get the actual number of block validations, you need to keep track of them separately
+                // Here, we assume that block validations are counted somewhere in your logic
                 status.block_validations = poh_entries; // Placeholder for actual validation count
 
                 // Gossip Protocol
-                status.gossip_protocol = true; // Placeholder for actual gossip status
+                let gossip_activity = self.gossip_activity.lock().await;
+                status.gossip_protocol = gossip_activity.messages_received > 0;
 
                 // Transactions
                 status.transactions = self.poh_generator.transactions.lock().await.len();
@@ -59,15 +67,19 @@ impl TestMonitor {
                 status.proof_of_stake = !self.poh_generator.stakes.lock().await.is_empty();
 
                 // Leader Election
-                status.leader_election = true; // Placeholder for actual leader election status
+                let current_leader = self.poh_generator.current_leader.lock().await;
+                status.leader_election = current_leader.is_some();
+
+                // Total Circulating Supply
+                status.total_circulating_supply = self.poh_generator.stakes.lock().await.values().sum();
             }
             tokio::time::sleep(Duration::from_secs(5)).await; // Adjust as needed.
         }
     }
 }
 
-pub async fn start_test_monitor(poh_generator: Arc<PoHGenerator>) {
-    let test_monitor = TestMonitor::new(poh_generator);
+pub async fn start_test_monitor(poh_generator: Arc<PoHGenerator>, gossip_activity: Arc<Mutex<GossipActivity>>) {
+    let test_monitor = TestMonitor::new(poh_generator, gossip_activity);
     let status = test_monitor.status.clone();
 
     tokio::spawn(async move {
