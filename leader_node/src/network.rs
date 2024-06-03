@@ -11,6 +11,7 @@ use crate::block::Block;
 use rand::Rng;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
+use bs58;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Message {
@@ -52,9 +53,10 @@ pub async fn handle_connection(
     let validator_id = match serde_json::from_slice::<Message>(&buffer) {
         Ok(Message::RegisterValidator(validator)) => {
             let mut validators = validators.lock().await;
-            validators.insert(validator.id.clone(), 0);
-            println!("Registered validator: {}", validator.id);
-            validator.id.clone()
+            let validator_id_str = bs58::encode(validator.public_key.clone()).into_string();
+            validators.insert(validator_id_str.clone(), 0);
+            println!("Registered validator: {}", validator_id_str);
+            validator_id_str
         }
         _ => {
             println!("First message must be RegisterValidator");

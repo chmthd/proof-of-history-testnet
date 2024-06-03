@@ -1,13 +1,11 @@
 use tokio::net::TcpStream;
 use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
 use serde::{Serialize, Deserialize};
-use sha2::{Sha256, Digest};
+use rand::{Rng, SeedableRng, rngs::StdRng};
 use rand::seq::IteratorRandom;
-use rand::rngs::StdRng;
-use rand::SeedableRng;
-use rand::Rng;
 use validator::poh_handler::{PohEntry, validate_poh_entries};
 use validator::transaction::{Transaction, create_transaction};
+use bs58;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct Block {
@@ -33,6 +31,13 @@ enum Message {
     GossipMessage(String), 
 }
 
+fn generate_sol_address() -> Vec<u8> {
+    let mut rng = rand::thread_rng();
+    let mut address = [0u8; 32];
+    rng.fill(&mut address);
+    address.to_vec()
+}
+
 async fn gossip_message(message: &Message, peer_addrs: &Vec<String>) {
     let serialized_message = serde_json::to_string(&message).unwrap();
     let message_length = (serialized_message.len() as u32).to_be_bytes();
@@ -55,12 +60,13 @@ async fn gossip_message(message: &Message, peer_addrs: &Vec<String>) {
 async fn main() -> io::Result<()> {
     let mut rng = rand::thread_rng();
     let validator_id = format!("validator_{}", rng.gen::<u32>());
+    let public_key = generate_sol_address();
     let mut stream = TcpStream::connect("127.0.0.1:8080").await?;
     let peer_addrs = vec!["127.0.0.1:8081".to_string(), "127.0.0.1:8082".to_string()]; 
 
     let register_message = Message::RegisterValidator(Validator {
         id: validator_id.clone(),
-        public_key: vec![1, 2, 3, 4, 5],
+        public_key: public_key.clone(),
     });
     let serialized_register = serde_json::to_string(&register_message).unwrap();
     stream.write_all(&(serialized_register.len() as u32).to_be_bytes()).await?;
@@ -74,7 +80,7 @@ async fn main() -> io::Result<()> {
         validator_id.clone(),
         "recipient_1".to_string(),
         100,
-        vec![1, 2, 3, 4]
+        public_key.clone(),
     );
     let transaction_message = Message::Transaction(sample_transaction.clone());
     let serialized_transaction = serde_json::to_string(&transaction_message).unwrap();

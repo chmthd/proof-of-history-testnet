@@ -12,6 +12,8 @@ rand = { version = "0.8", features = ["std", "alloc"] }
 env_logger = "0.9"
 log = "0.4"
 warp = "0.3"
+hex = "0.4"
+bs58 = "0.4"
 validator = { path = "../validator" }
 
 [[bin]]
