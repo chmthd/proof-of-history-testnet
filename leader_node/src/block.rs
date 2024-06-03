@@ -34,33 +34,39 @@ pub async fn propose_block(
     validators: Arc<Mutex<HashMap<String, usize>>>,
     _votes: Arc<Mutex<HashMap<String, bool>>>,
     transactions: Arc<Mutex<Vec<Transaction>>>,
-    parent_hash: [u8; 32],
-    block_height: u64,
+    parent_hash: Arc<Mutex<[u8; 32]>>,
+    block_height: Arc<Mutex<u64>>,
 ) {
     loop {
         tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
 
-        let poh_entries;
         let block_transactions;
-        {
-            let poh_guard = poh.lock().await;
-            poh_entries = poh_guard.clone();
-        }
         {
             let txs_guard = transactions.lock().await;
             block_transactions = txs_guard.clone();
         }
 
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-        let block_hash = generate_block_hash(&parent_hash, block_height, timestamp, &block_transactions);
+
+        let current_parent_hash = *parent_hash.lock().await;
+        let current_block_height = *block_height.lock().await;
+
+        let block_hash = generate_block_hash(&current_parent_hash, current_block_height, timestamp, &block_transactions);
 
         let block = Block {
-            parent_hash: hex::encode(parent_hash),
+            parent_hash: hex::encode(current_parent_hash),
             block_hash: hex::encode(block_hash),
-            block_height: block_height + 1,
+            block_height: current_block_height + 1,
             timestamp,
             transactions: block_transactions,
         };
+
+        {
+            let mut parent_hash_lock = parent_hash.lock().await;
+            *parent_hash_lock = block_hash;
+            let mut block_height_lock = block_height.lock().await;
+            *block_height_lock += 1;
+        }
 
         println!("Proposing new block: {:?}", block);
 

@@ -113,15 +113,13 @@ async fn main() {
     tokio::spawn({
         let poh_generator = Arc::clone(&poh_generator);
         async move {
-            let parent_hash = *poh_generator.parent_hash.lock().await;
-            let block_height = *poh_generator.block_height.lock().await;
             block::propose_block(
                 Arc::clone(&poh_generator.poh),
                 Arc::clone(&poh_generator.validators),
                 Arc::clone(&poh_generator.votes),
                 Arc::clone(&poh_generator.transactions),
-                parent_hash,
-                block_height,
+                Arc::clone(&poh_generator.parent_hash),
+                Arc::clone(&poh_generator.block_height),
             ).await;
         }
     });
@@ -137,7 +135,7 @@ async fn main() {
         let poh_generator = Arc::clone(&poh_generator);
         let gossip_activity = Arc::clone(&gossip_activity);
         async move {
-            tester::start_test_monitor(Arc::clone(&poh_generator), Arc::clone(&gossip_activity)).await;
+            tester::start_test_monitor(poh_generator, gossip_activity).await;
         }
     });
 
