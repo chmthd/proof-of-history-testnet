@@ -1,41 +1,60 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Testnet Monitor</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-        }
-        .container {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-        }
-        .status-box {
-            border: 1px solid #ccc;
-            padding: 20px;
-            width: 300px;
-            text-align: center;
-        }
-        .status {
-            margin: 10px 0;
-        }
-    </style>
+    <title>Proof of History Testnet Monitor</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <link href="style.css" rel="stylesheet">
 </head>
 <body>
     <div class="container">
-        <div class="status-box">
-            <h1>Proof of History Testnet Monitor</h1>
-            <div class="status" id="proof_of_history">Proof of History: N/A</div>
-            <div class="status" id="validator_count">Validators: N/A</div>
-            <div class="status" id="block_proposals">Block Proposals: N/A</div>
-            <div class="status" id="block_validations">Block Validations: N/A</div>
-            <div class="status" id="block_generation">Block Generation: N/A</div>
-            <div class="status" id="gossip_protocol">Gossip Protocol: N/A</div>
-            <div class="status" id="transactions">Transactions: N/A</div>
-            <div class="status" id="proof_of_stake">Proof of Stake: N/A</div>
-            <div class="status" id="leader_election">Leader Election: N/A</div>
+        <h1>Proof of History Testnet Monitor</h1>
+        <div class="stats">
+            <div class="stat">
+                <h3>Proof of History</h3>
+                <p id="proof_of_history">N/A</p>
+            </div>
+            <div class="stat">
+                <h3>Proof of Stake</h3>
+                <p id="proof_of_stake">N/A</p>
+            </div>
+            <div class="stat">
+                <h3>Leader Election</h3>
+                <p id="leader_election">N/A</p>
+            </div>
+            <div class="stat">
+                <h3>Gossip Protocol</h3>
+                <p id="gossip_protocol">N/A</p>
+            </div>
+            <div class="stat">
+                <h3>Average Block Time</h3>
+                <p id="average_block_time">N/A</p>
+            </div>
+            <div class="stat">
+                <h3>Block Count</h3>
+                <p id="block_count">N/A</p>
+            </div>
+            <div class="stat">
+                <h3>Validator Count</h3>
+                <p id="validator_count">N/A</p>
+            </div>
+            <div class="stat">
+                <h3>Current Epoch</h3>
+                <p id="current_epoch">N/A</p>
+            </div>
+        </div>
+        <div class="stats">
+            <div class="stat">
+                <h3>Circulating Supply</h3>
+                <p id="circulating_supply">N/A</p>
+            </div>
+            <div class="stat">
+                <h3>Transactions</h3>
+                <p id="transactions">N/A</p>
+            </div>
+            <div class="stat">
+                <h3>Throughput (TPS)</h3>
+                <p id="throughput">N/A</p>
+            </div>
         </div>
     </div>
     <script>
@@ -43,21 +62,24 @@
             try {
                 const response = await fetch('/status');
                 const status = await response.json();
-                document.getElementById('proof_of_history').innerText = 'Proof of History: ' + (status.proof_of_history ? 'Yes' : 'No');
-                document.getElementById('validator_count').innerText = 'Validators: ' + status.validator_count;
-                document.getElementById('block_proposals').innerText = 'Block Proposals: ' + status.block_proposals;
-                document.getElementById('block_validations').innerText = 'Block Validations: ' + status.block_validations;
-                document.getElementById('block_generation').innerText = 'Block Generation: ' + status.block_generation;
-                document.getElementById('gossip_protocol').innerText = 'Gossip Protocol: ' + (status.gossip_protocol ? 'Yes' : 'No');
-                document.getElementById('transactions').innerText = 'Transactions: ' + status.transactions;
-                document.getElementById('proof_of_stake').innerText = 'Proof of Stake: ' + (status.proof_of_stake ? 'Yes' : 'No');
-                document.getElementById('leader_election').innerText = 'Leader Election: ' + (status.leader_election ? 'Yes' : 'No');
+                document.getElementById('proof_of_history').innerText = status.proof_of_history ? 'Yes' : 'No';
+                document.getElementById('proof_of_stake').innerText = status.proof_of_stake ? 'Yes' : 'No';
+                document.getElementById('leader_election').innerText = status.leader_election ? 'Yes' : 'No';
+                document.getElementById('gossip_protocol').innerText = status.gossip_protocol ? 'Yes' : 'No';
+                document.getElementById('average_block_time').innerText = status.average_block_time + ' seconds';
+                document.getElementById('block_count').innerText = status.block_count;
+                document.getElementById('validator_count').innerText = status.validator_count;
+                document.getElementById('current_epoch').innerText = status.current_epoch;
+                document.getElementById('circulating_supply').innerText = status.total_circulating_supply;
+                document.getElementById('transactions').innerText = status.transactions;
+                document.getElementById('throughput').innerText = status.throughput;
             } catch (e) {
                 console.error('Failed to fetch status:', e);
             }
         }
 
-        setInterval(fetchStatus, 2000);
+        setInterval(fetchStatus, 5000); // Update every 5 seconds
+        fetchStatus(); // Initial fetch
     </script>
 </body>
 </html>
