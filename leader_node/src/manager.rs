@@ -1,11 +1,13 @@
 use serde::{Serialize, Deserialize};
-use validator::poh_handler::PohEntry; 
+use validator::poh_handler::PohEntry;
 use validator::transaction::Transaction;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Block {
-    pub poh_entries: Vec<PohEntry>,
+    pub parent_hash: Vec<u8>,
     pub block_hash: Vec<u8>,
+    pub block_height: u64,
+    pub timestamp: u64,
     pub transactions: Vec<Transaction>,
 }
 
@@ -17,12 +19,13 @@ pub enum Message {
     ConsensusVote(Block),
     RegisterValidator(Validator),
     Transaction(Transaction),
+    GossipMessage(String),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Validator {
     pub id: String,
-    pub public_key: String,
+    pub public_key: Vec<u8>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

@@ -22,6 +22,8 @@ struct PoHGenerator {
     stakes: Arc<Mutex<HashMap<String, u64>>>,
     leader_election: LeaderElection,
     current_leader: Arc<Mutex<Option<String>>>,
+    parent_hash: Arc<Mutex<[u8; 32]>>,
+    block_height: Arc<Mutex<u64>>,
 }
 
 impl PoHGenerator {
@@ -34,7 +36,9 @@ impl PoHGenerator {
             transactions: Arc::new(Mutex::new(Vec::new())),
             stakes: Arc::clone(&stakes),
             leader_election: LeaderElection::new(Arc::clone(&stakes)),
-            current_leader: Arc::new(Mutex::new(None)), 
+            current_leader: Arc::new(Mutex::new(None)),
+            parent_hash: Arc::new(Mutex::new([0u8; 32])),
+            block_height: Arc::new(Mutex::new(0)),
         }
     }
 
@@ -109,11 +113,15 @@ async fn main() {
     tokio::spawn({
         let poh_generator = Arc::clone(&poh_generator);
         async move {
+            let parent_hash = *poh_generator.parent_hash.lock().await;
+            let block_height = *poh_generator.block_height.lock().await;
             block::propose_block(
                 Arc::clone(&poh_generator.poh),
                 Arc::clone(&poh_generator.validators),
                 Arc::clone(&poh_generator.votes),
                 Arc::clone(&poh_generator.transactions),
+                parent_hash,
+                block_height,
             ).await;
         }
     });

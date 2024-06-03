@@ -16,6 +16,9 @@ pub struct PoHGenerator {
     pub transactions: Arc<Mutex<Vec<Transaction>>>,
     pub stakes: Arc<Mutex<HashMap<String, u64>>>,
     pub leader_election: LeaderElection,
+    pub current_leader: Arc<Mutex<Option<String>>>,
+    pub parent_hash: Vec<u8>,
+    pub block_height: u64,
 }
 
 impl PoHGenerator {
@@ -26,8 +29,11 @@ impl PoHGenerator {
             validators: Arc::new(Mutex::new(HashMap::new())),
             votes: Arc::new(Mutex::new(HashMap::new())),
             transactions: Arc::new(Mutex::new(Vec::new())),
-            stakes: Arc::new(Mutex::new(HashMap::new())),
+            stakes: Arc::clone(&stakes),
             leader_election: LeaderElection::new(Arc::clone(&stakes)),
+            current_leader: Arc::new(Mutex::new(None)),
+            parent_hash: vec![0; 32],
+            block_height: 0,
         }
     }
 
