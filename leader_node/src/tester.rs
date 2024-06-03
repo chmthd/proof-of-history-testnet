@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::PoHGenerator;
 use crate::network::GossipActivity;
-use validator::poh_handler::PohEntry; // Import PohEntry from the correct module
+use validator::poh_handler::PohEntry; 
 
 #[derive(Serialize, Default)]
 struct TestStatus {
@@ -84,8 +84,8 @@ impl TestMonitor {
                 // Block Count
                 status.block_count = poh_entries;
 
-                // Current Epoch (simplified example, should be based on your implementation)
-                status.current_epoch = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() / 600; // assuming 10 minutes per epoch
+                // Current Epoch simplified
+                status.current_epoch = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() / 600; 
             }
             tokio::time::sleep(Duration::from_secs(5)).await;
         }
@@ -96,7 +96,6 @@ fn calculate_average_block_time(poh_entries: &[PohEntry]) -> f64 {
     if poh_entries.is_empty() {
         return 0.0;
     }
-    // Assuming poh_entries have timestamps
     let mut total_time = 0;
     let mut count = 0;
 
@@ -116,7 +115,7 @@ fn calculate_average_block_time(poh_entries: &[PohEntry]) -> f64 {
 
 fn calculate_throughput(poh_entries: &[PohEntry]) -> usize {
     // Simplified example: count the number of entries per second
-    poh_entries.len() // You should refine this based on actual timestamps and intervals
+    poh_entries.len() 
 }
 
 pub async fn start_test_monitor(poh_generator: Arc<PoHGenerator>, gossip_activity: Arc<Mutex<GossipActivity>>) {
